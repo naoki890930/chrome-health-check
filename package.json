@@ -1,0 +1,21 @@
+{
+  "name": "chrome-health-check",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "package": "npm run babel && cp package.json dist/ && cd dist && PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1 npm install --production && zip -r index.zip index.js node_modules/ HeadlessChrome-63.0.3213.0.tar.gz",
+    "babel": "babel src/index.js --out-file dist/index.js"
+  },
+  "author": "Naoki Nishiyama",
+  "license": "MIT",
+  "dependencies": {
+    "tar": "^4.0.2",
+    "puppeteer": "^0.10.2"
+  },
+  "devDependencies": {
+    "babel-cli": "^6.26.0",
+    "babel-preset-env": "^1.6.1"
+  }
+}
