@@ -5,16 +5,17 @@ const puppeteer = require('puppeteer')
 const aws = require('aws-sdk')
 const s3 = new aws.S3({apiVersion: '2006-03-01'})
 
-const tmpPath = '/tmp'
-const execPath = tmpPath + '/headless_shell'
+const tmpPath = path.join(path.sep, 'tmp')
+const execPath = path.join(tmpPath, 'headless_shell')
 const imageName = 'screenshot.png'
-const imagePath = tmpPath + '/' + imageName
-const tarPath = path.join('HeadlessChrome-63.0.3213.0.tar.gz')
+const imagePath = path.join(tmpPath, imageName)
+const tarPath = path.join('headless_shell.tar.gz')
 const url = 'https://www.google.co.jp/'
-const bucket = 'chrome-health-check'
-const key = imageName
+const bucket = 'ts1-status-check-fdev'
+const key = path.join('data', imageName)
 
 exports.handler = (event, context, callback) => {
+    console.log(execPath)
     setupChrome()
     .then(() => checkFile())
     .then(() => capture())
@@ -68,15 +69,23 @@ function checkFile() {
 }
 
 async function capture() {
+    const isAvailable = isFileExisting(execPath)
+    console.log('isFile', isAvailable)
+
     const browser = await puppeteer.launch({
         headless: true,
         executablePath: execPath,
-        args: ['--disable-gpu'],
+        args: [
+            '--no-sandbox',
+            '--disable-gpu',
+            '--single-process',
+        ],
     })
     const page = await browser.newPage()
     await page.goto(url)
     await page.screenshot({path: imagePath})
     await browser.close()
+    return 'done'
 }
 
 function upload() {
