@@ -1,80 +1,67 @@
 const fs = require('fs')
-const path = require('path')
+const exec = require('child_process').exec
 const tar = require('tar')
 const puppeteer = require('puppeteer')
+const imageDiff = require('image-diff')
 const aws = require('aws-sdk')
 const s3 = new aws.S3({apiVersion: '2006-03-01'})
 
-const tmpPath = path.join(path.sep, 'tmp')
-const execPath = path.join(tmpPath, 'headless_shell')
-const imageName = 'screenshot.png'
-const imagePath = path.join(tmpPath, imageName)
-const tarPath = path.join('headless_shell.tar.gz')
-const url = 'https://www.google.co.jp/'
-const bucket = 'ts1-status-check-fdev'
-const key = path.join('data', imageName)
+const config = require('./config')
 
-exports.handler = (event, context, callback) => {
-    console.log(execPath)
-    setupChrome()
-    .then(() => checkFile())
-    .then(() => capture())
-    .then(() => upload())
-    .then(() => callback(null, 'Success'))
-    .catch(err => callback(err, null))
-};
+exports.handler = async (event, context, callback) => {
+    try {
+        await setupChrome()
+        await setFontconfig()
+        await capture()
+        // await upload()
+        await compare()
+        callback(null, 'Success')
+    } catch (err) {
+        callback(err, null)
+    }
+}
 
 function setupChrome() {
     return new Promise((resolve, reject) => {
-        if (isFileExisting(execPath)) {
-            resolve()
-            return
+        if (existsFile(config.execPath)) {
+            return resolve()
         }
 
-        fs.createReadStream(tarPath)
-        .on('error', (err) => reject(err))
-        .pipe(tar.x({C: tmpPath}))
-        .on('error', (err) => reject(err))
-        .on('end', () => resolve());
-    });
+        // fs.createReadStream(config.tarPath)
+        s3.getObject({Bucket: config.bucket, Key: config.readKey}).createReadStream()
+            .on('error', (err) => reject(err))
+            .pipe(tar.x({C: config.tmpPath}))
+            .on('error', (err) => reject(err))
+            .on('end', () => resolve())
+    })
 }
 
-function isFileExisting(path) {
+function existsFile(path) {
     try {
-        fs.statSync(path);
+        fs.statSync(path)
         return true
     } catch(err) {
         return false
     }
 }
 
-function checkFile() {
+function setFontconfig() {
     return new Promise((resolve, reject) => {
-        try {
-            var list = fs.readdirSync(tmpPath)
-            for (var i = 0; i < list.length; i++) {
-                var stats = fs.statSync(path.join(tmpPath, list[i]))
-                if (stats.isFile()) {
-                    console.log(list[i])
-                }
+        process.env.HOME = process.env.LAMBDA_TASK_ROOT
+        const command = `fc-cache -v ${process.env.HOME}.fonts`
+        exec(command, (error, stdout, stderr) => {
+            if (error) {
+                return reject(error)
             }
-            console.log('no file')
             resolve()
-        }
-        catch (err) {
-            console.error(err)
-            reject(err)
-        }
+        })
     })
 }
 
 async function capture() {
-    const isAvailable = isFileExisting(execPath)
-    console.log('isFile', isAvailable)
-
     const browser = await puppeteer.launch({
         headless: true,
-        executablePath: execPath,
+        executablePath: config.execPath,
         args: [
             '--no-sandbox',
             '--disable-gpu',
@@ -82,21 +69,39 @@ async function capture() {
         ],
     })
     const page = await browser.newPage()
-    await page.goto(url)
-    await page.screenshot({path: imagePath})
+    await page.setViewport(config.captureSize)
+    await page.goto(config.url)
+    await page.screenshot({path: config.captureImagePath})
     await browser.close()
-    return 'done'
 }
 
 function upload() {
     return new Promise((resolve, reject) => {
         s3.upload({
-            Bucket: bucket,
-            Key: key,
-            Body: fs.createReadStream(imagePath)
+            Bucket: config.bucket,
+            Key: config.writeKey,
+            Body: fs.createReadStream(config.captureImagePath)
         }, (err) => {
             if (err) reject(err)
             resolve()
+        })
+    })
+}
+
+function compare() {
+    return new Promise((resolve, reject) => {
+        const option = {
+            actualImage: config.captureImagePath,
+            expectedImage: config.expectImagePath,
+        }
+        imageDiff.getFullResult(option, (err, result) => {
+            if (err) {
+                reject(err)
+            } else if (result.percentage > 0.01) {
+                reject(`Error image-diff: difference is over 1%`)
+            } else {
+                resolve()
+            }
         })
     })
 }
